@@ -17,9 +17,24 @@ The experiment samples 20 starting etas from a log-uniform prior on `[0.03, 0.80
 - fixed: train all 750 trees at the sampled `eta0`;
 - adaptive: start from the exact same `eta0`, then update `log(eta)` every 10 trees using an AdaGrad-normalized multiclass validation hypergradient.
 
-The adaptive method gets no counterfactual branches and fits exactly 750 main-path trees, the same tree-fit budget as the paired fixed baseline. The untouched test split is only evaluated after training. The primary estimand is the mean paired test-logloss difference over starting eta drawn from the prior.
+The adaptive method gets no counterfactual branches and fits exactly 750 main-path trees, the same tree-fit budget as the paired fixed baseline. The untouched test split never affects adaptation. After both methods in a pair finish, the final boosters are evaluated retrospectively at checkpoints to export convergence curves.
 
-The predeclared gate is: mean paired test-logloss improvement of at least 0.005 and adaptive wins on at least 70% of sampled starting etas. An exact prior-median start, `sqrt(0.03 * 0.80)`, is also reported separately.
+The primary gate remains final performance: mean paired test-logloss improvement of at least 0.005 and adaptive wins on at least 70% of sampled starting etas. An exact prior-median start, `sqrt(0.03 * 0.80)`, is also reported separately.
+
+### Compute-efficiency analysis
+
+The experiment also records both algorithmic compute (trees fit) and actual training wall time. This lets us distinguish a method that simply ends better from one that reaches a useful loss with fewer trees.
+
+`covtype_online_eta_convergence.csv` contains one row per pair, method, and checkpoint, including tree count, current eta, control log-loss, test log-loss, test accuracy, and cumulative training wall time.
+
+`covtype_online_eta_compute_summary.csv` contains one row per pair with:
+
+- mean test log-loss over the training trajectory (normalized loss-vs-trees AUC; lower is better);
+- earliest adaptive tree count and wall time that reaches the fixed run's final test loss;
+- earliest fixed tree count and wall time that reaches the adaptive run's final test loss;
+- final wall times and final paired test-loss difference.
+
+The JSON summary also reports expected trajectory loss and mean wall time across prior draws. Fixed XGBoost is trained in one native call; adaptive training pays its real online-update/Python overhead, so tree count is the clean algorithmic-compute comparison while wall time is the practical implementation comparison.
 
 ## Local runs
 
@@ -33,4 +48,6 @@ python covtype_online_eta.py --nthread 32
 - `results/covtype_online_eta_pairs.csv`
 - `results/covtype_online_eta_median.csv`
 - `results/covtype_online_eta_history.json`
+- `results/covtype_online_eta_convergence.csv`
+- `results/covtype_online_eta_compute_summary.csv`
 - `results/covtype_online_eta_summary.json`
