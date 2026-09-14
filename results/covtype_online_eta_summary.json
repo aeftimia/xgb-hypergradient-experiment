@@ -1,0 +1,71 @@
+{
+  "dataset": "UCI Covertype",
+  "sample_size": 250000,
+  "n_rounds": 750,
+  "n_prior_draws": 20,
+  "checkpoint_every": 25,
+  "eta_prior": {
+    "distribution": "log-uniform",
+    "min": 0.03,
+    "max": 0.8,
+    "median": 0.15491933384829668
+  },
+  "adaptive_rule": {
+    "space": "log_eta",
+    "update_every_trees": 10,
+    "adagrad_log_step": 0.25,
+    "counterfactual_tree_fits": 0
+  },
+  "expected_fixed_test_logloss": 0.19864278361201287,
+  "expected_adaptive_test_logloss": 0.16916145086288453,
+  "mean_paired_test_logloss_delta": -0.02948133274912834,
+  "mean_paired_improvement": 0.02948133274912834,
+  "paired_delta_95pct_t_interval": [
+    -0.04091651825469639,
+    -0.018046147243560295
+  ],
+  "adaptive_win_rate": 0.9,
+  "expected_fixed_trajectory_mean_test_logloss": 0.2802428642536203,
+  "expected_adaptive_trajectory_mean_test_logloss": 0.23920900590717786,
+  "mean_trajectory_test_logloss_delta": -0.041033858346442374,
+  "mean_fixed_training_wall_seconds": 21.276585422900098,
+  "mean_adaptive_training_wall_seconds": 445.517101025048,
+  "median_start": {
+    "eta0": 0.15491933384829668,
+    "fixed_final_eta": 0.15491933384829668,
+    "fixed_control_logloss": 0.2011009156703949,
+    "fixed_test_logloss": 0.203525111079216,
+    "fixed_test_accuracy": 0.92376,
+    "adaptive_final_eta": 0.3314405558293734,
+    "adaptive_control_logloss": 0.15933029353618622,
+    "adaptive_test_logloss": 0.16100169718265533,
+    "adaptive_test_accuracy": 0.9414666666666667,
+    "label": "prior_median",
+    "paired_test_logloss_delta": -0.04252341389656067,
+    "adaptive_wins": true
+  },
+  "median_start_compute": {
+    "label": "prior_median",
+    "eta0": 0.15491933384829668,
+    "fixed_final_test_logloss": 0.203525111079216,
+    "adaptive_final_test_logloss": 0.16100169718265533,
+    "paired_final_test_logloss_delta": -0.04252341389656067,
+    "fixed_trajectory_mean_test_logloss": 0.29735888317227366,
+    "adaptive_trajectory_mean_test_logloss": 0.24485958442091943,
+    "trajectory_mean_test_logloss_delta": -0.05249929875135423,
+    "adaptive_trees_to_fixed_final_loss": 400,
+    "adaptive_seconds_to_fixed_final_loss": 127.91464712499874,
+    "fixed_trees_to_adaptive_final_loss": null,
+    "fixed_seconds_to_adaptive_final_loss": null,
+    "fixed_final_training_wall_seconds": 21.077198166996823,
+    "adaptive_final_training_wall_seconds": 449.52383383399865
+  },
+  "passes_gate": true,
+  "gate_definition": "mean paired test-logloss improvement >=0.005 and adaptive win rate >=70%",
+  "tree_fit_budget_per_pair": {
+    "fixed": 750,
+    "adaptive": 750
+  },
+  "test_used_for_adaptation": false,
+  "elapsed_seconds": 12145.123278856277
+}

@@ -46,7 +46,7 @@ PARAMS = {
     "reg_lambda": 1.0,
     "reg_alpha": 0.0,
     "tree_method": "hist",
-    "nthread": 2,
+    "nthread": 32,
     "seed": SEED,
 }
 
