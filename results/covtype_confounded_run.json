@@ -1,0 +1,30 @@
+{
+  "status": "INVALID_CONFOUNDED",
+  "reason": "The rollout oracle used different random seeds for eta candidates while subsample=0.9 and colsample_bytree=0.9, so it selected over both eta and stochastic tree realizations. The apparent oracle gain must not be interpreted as evidence for dynamic eta control.",
+  "dataset": "UCI Covertype",
+  "sample_size": 250000,
+  "train_size": 175000,
+  "control_size": 37500,
+  "test_size": 37500,
+  "n_rounds": 500,
+  "block": 25,
+  "etas": [0.025, 0.05, 0.1, 0.2, 0.3],
+  "best_fixed": {
+    "method": "fixed_eta_0.3",
+    "eta": 0.3,
+    "best_round": 500,
+    "control_logloss": 0.17995043098926544,
+    "test_logloss": 0.18331703543663025,
+    "test_accuracy": 0.93312
+  },
+  "oracle": {
+    "method": "rollout_oracle_k25",
+    "best_round": 500,
+    "control_logloss": 0.17497919499874115,
+    "test_logloss": 0.17782410979270935,
+    "test_accuracy": 0.9345066666666667
+  },
+  "apparent_oracle_minus_fixed_test_logloss": -0.0054929256439208984,
+  "apparent_relative_test_logloss_change": -0.029964076338228285,
+  "elapsed_seconds": 695.0986866950989
+}
