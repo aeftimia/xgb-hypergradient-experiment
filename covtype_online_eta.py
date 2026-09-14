@@ -1,61 +1,44 @@
-"""Paired falsification test for online discovery of XGBoost shrinkage.
+"""Paired test for online discovery of XGBoost shrinkage.
 
 Question
 --------
 Given only a reasonable prior range for eta, does adapting eta online improve
-expected final performance relative to picking one eta once and keeping it
-fixed?
+expected performance relative to picking one eta once and keeping it fixed?
 
 Design
 ------
-* UCI Covertype, same deterministic 250k sample/split as covtype_falsification.py.
+* UCI Covertype, deterministic 250k sample/split.
 * Prior: log-uniform eta in [0.03, 0.80].
-* Draw 20 eta_0 values once from that prior with a fixed RNG seed.
-* For every eta_0, train a paired comparison:
-    1) fixed: keep eta=eta_0 for all 750 trees;
+* Draw eta_0 values once from that prior with a fixed RNG seed.
+* For every eta_0, compare:
+    1) fixed: keep eta=eta_0 for all trees;
     2) adaptive: start at the same eta_0 and update log(eta) online.
-* The adaptive method gets NO counterfactual tree branches. It trains exactly
-  the same number of main-path trees as the fixed method. It uses a held-out
-  control split to estimate a hypergradient from the latest fitted tree.
-* Test labels/predictions are used only after each 750-tree run is complete.
-
-Adaptive rule
--------------
-Let z = log(eta). For the newly added tree, holding that tree fixed,
-
-    d margin / d eta ~= (margin_after - margin_before) / eta.
-
-For multiclass log-loss,
-
-    dL / d margin_ic = p_ic - 1[y_i=c].
-
-Therefore
-
-    dL / d z = eta * dL/deta
-             = mean_i sum_c (p_ic - onehot_ic) * delta_margin_ic.
-
-We update z every ADAPT_EVERY trees with an AdaGrad-normalized step. This is a
-pre-specified one-trajectory online learner: there is no eta grid search and no
-extra tree-fitting compute for adaptation.
+* Adaptive gets NO counterfactual tree branches: equal main-path tree budget.
+* Test data never affects adaptation or model selection.
+* After BOTH runs in a pair finish, export test/control loss versus tree count,
+  plus cumulative wall time, so convergence speed can be analyzed directly.
 
 Primary estimand
 ----------------
-Mean paired test-logloss difference over eta_0 ~ LogUniform(0.03, 0.80):
+Mean paired final test-logloss difference over eta_0 ~ LogUniform(0.03, 0.80).
+Negative is better for adaptation.
 
-    mean(adaptive_test_logloss - fixed_test_logloss).
+Compute-efficiency exports
+--------------------------
+results/covtype_online_eta_convergence.csv contains, for each pair/method and
+checkpoint: tree count, control/test log-loss, test accuracy, eta, and measured
+cumulative training wall time.
 
-Negative is better for adaptation. We also report the fixed-prior expectation,
-adaptive expectation, win rate, and a paired run starting exactly at the prior
-median sqrt(eta_min * eta_max).
+results/covtype_online_eta_compute_summary.csv contains pair-level quantities:
+* normalized AUC (mean) of test loss over the training trajectory;
+* earliest adaptive tree/time reaching the fixed run's final test loss;
+* earliest fixed tree/time reaching the adaptive run's final test loss;
+* final wall time and paired final-loss delta.
 
-Predeclared success gate
-------------------------
-The experiment passes if BOTH:
-1) mean paired test-logloss improvement is at least 0.005; and
-2) adaptive beats fixed for at least 70% of sampled starting etas.
-
-This is deliberately a practical test against initial hyperparameter ignorance,
-not a claim that adaptation must beat an oracle-tuned fixed eta.
+Wall time is intentionally measured using each method's actual implementation:
+fixed XGBoost trains in one native call, while adaptive performs online updates
+and therefore pays its Python/prediction overhead. Tree count is the cleaner
+algorithmic-compute comparison; wall time is the practical comparison.
 """
 
 from __future__ import annotations
@@ -85,7 +68,8 @@ N_STARTS = 20
 ETA_MIN = 0.03
 ETA_MAX = 0.80
 ADAPT_EVERY = 10
-LOG_STEP = 0.25  # first normalized step in natural-log eta units (~28% multiplicative)
+CHECKPOINT_EVERY = 25
+LOG_STEP = 0.25
 EPS = 1e-12
 
 
@@ -99,6 +83,7 @@ def parse_args():
     )
     p.add_argument("--n-starts", type=int, default=N_STARTS)
     p.add_argument("--n-rounds", type=int, default=N_ROUNDS)
+    p.add_argument("--checkpoint-every", type=int, default=CHECKPOINT_EVERY)
     return p.parse_args()
 
 
@@ -133,6 +118,20 @@ def softmax(x: np.ndarray) -> np.ndarray:
     return e / np.sum(e, axis=1, keepdims=True)
 
 
+class TimingCallback(xgb.callback.TrainingCallback):
+    def __init__(self):
+        self.start = None
+        self.times = []
+
+    def before_training(self, model):
+        self.start = time.perf_counter()
+        return model
+
+    def after_iteration(self, model, epoch, evals_log):
+        self.times.append(time.perf_counter() - self.start)
+        return False
+
+
 def load_data():
     print("loading Covertype...", flush=True)
     X, y = fetch_covtype(return_X_y=True)
@@ -163,11 +162,13 @@ def load_data():
 
 
 def fixed_run(dtrain, dctrl, dtest, yctrl, ytest, eta0, nthread, n_rounds):
+    timer = TimingCallback()
     b = xgb.train(
         params(nthread, eta0),
         dtrain,
         num_boost_round=n_rounds,
         verbose_eval=False,
+        callbacks=[timer],
     )
     ctrl = metrics(yctrl, b.predict(dctrl))
     test = metrics(ytest, b.predict(dtest))
@@ -177,16 +178,19 @@ def fixed_run(dtrain, dctrl, dtest, yctrl, ytest, eta0, nthread, n_rounds):
         "fixed_control_logloss": ctrl["logloss"],
         "fixed_test_logloss": test["logloss"],
         "fixed_test_accuracy": test["accuracy"],
+        "booster": b,
+        "wall_times": timer.times,
     }
 
 
 def adaptive_run(dtrain, dctrl, dtest, yctrl, ytest, eta0, nthread, n_rounds):
-    # Zero-round booster gives us XGBoost's exact initial/base margins.
     booster = xgb.train(params(nthread, eta0), dtrain, num_boost_round=0)
     eta = float(eta0)
     log_eta = math.log(eta)
     grad_sq_sum = 0.0
     history = []
+    wall_times = []
+    start = time.perf_counter()
 
     for t in range(1, n_rounds + 1):
         margin_before = booster.predict(dctrl, output_margin=True)
@@ -199,8 +203,6 @@ def adaptive_run(dtrain, dctrl, dtest, yctrl, ytest, eta0, nthread, n_rounds):
         )
         margin_after = booster.predict(dctrl, output_margin=True)
 
-        # For z=log(eta), eta cancels:
-        # dL/dz ~= mean sum_c (p-y_onehot) * (margin_after-margin_before).
         if t % ADAPT_EVERY == 0:
             p = softmax(margin_after)
             residual = p.copy()
@@ -229,6 +231,7 @@ def adaptive_run(dtrain, dctrl, dtest, yctrl, ytest, eta0, nthread, n_rounds):
                     "control_logloss": ctrl_loss,
                 }
             )
+        wall_times.append(time.perf_counter() - start)
 
     ctrl = metrics(yctrl, booster.predict(dctrl))
     test = metrics(ytest, booster.predict(dtest))
@@ -238,10 +241,71 @@ def adaptive_run(dtrain, dctrl, dtest, yctrl, ytest, eta0, nthread, n_rounds):
         "adaptive_test_logloss": test["logloss"],
         "adaptive_test_accuracy": test["accuracy"],
         "history": history,
+        "booster": booster,
+        "wall_times": wall_times,
     }
 
 
-def paired_run(dtrain, dctrl, dtest, yctrl, ytest, eta0, nthread, n_rounds, label):
+def eta_at_round(method, eta0, adaptive_history, tree_count):
+    if method == "fixed":
+        return float(eta0)
+    eta = float(eta0)
+    for h in adaptive_history:
+        if h["round"] <= tree_count:
+            eta = float(h["eta_after_update"])
+        else:
+            break
+    return eta
+
+
+def convergence_curve(
+    label, method, eta0, booster, wall_times, adaptive_history,
+    dctrl, dtest, yctrl, ytest, n_rounds, checkpoint_every,
+):
+    checkpoints = list(range(checkpoint_every, n_rounds + 1, checkpoint_every))
+    if not checkpoints or checkpoints[-1] != n_rounds:
+        checkpoints.append(n_rounds)
+
+    rows = []
+    for k in checkpoints:
+        pctrl = booster.predict(dctrl, iteration_range=(0, k))
+        ptest = booster.predict(dtest, iteration_range=(0, k))
+        cm = metrics(yctrl, pctrl)
+        tm = metrics(ytest, ptest)
+        rows.append({
+            "label": label,
+            "method": method,
+            "eta0": float(eta0),
+            "trees": int(k),
+            "eta": eta_at_round(method, eta0, adaptive_history, k),
+            "control_logloss": cm["logloss"],
+            "test_logloss": tm["logloss"],
+            "test_accuracy": tm["accuracy"],
+            "training_wall_seconds": float(wall_times[k - 1]),
+        })
+    return rows
+
+
+def first_reach(curve, target):
+    for r in curve:
+        if r["test_logloss"] <= target:
+            return r["trees"], r["training_wall_seconds"]
+    return None, None
+
+
+def curve_mean_loss(curve):
+    # Checkpoints are equally spaced except possibly the final partial interval;
+    # use trapezoidal integration over tree count and normalize by span.
+    x = np.asarray([0] + [r["trees"] for r in curve], dtype=float)
+    y0 = curve[0]["test_logloss"]
+    y = np.asarray([y0] + [r["test_logloss"] for r in curve], dtype=float)
+    return float(np.trapezoid(y, x) / x[-1])
+
+
+def paired_run(
+    dtrain, dctrl, dtest, yctrl, ytest, eta0, nthread, n_rounds,
+    checkpoint_every, label,
+):
     print(f"\n[{label}] eta0={eta0:.6f} fixed", flush=True)
     f = fixed_run(dtrain, dctrl, dtest, yctrl, ytest, eta0, nthread, n_rounds)
     print(
@@ -255,17 +319,58 @@ def paired_run(dtrain, dctrl, dtest, yctrl, ytest, eta0, nthread, n_rounds, labe
         f"eta_final={a['adaptive_final_eta']:.5f} delta={delta:+.6f}",
         flush=True,
     )
-    row = {**f, **{k: v for k, v in a.items() if k != "history"}}
+
+    # Test convergence is evaluated only now, after both training runs finish.
+    fixed_curve = convergence_curve(
+        label, "fixed", eta0, f["booster"], f["wall_times"], [],
+        dctrl, dtest, yctrl, ytest, n_rounds, checkpoint_every,
+    )
+    adaptive_curve = convergence_curve(
+        label, "adaptive", eta0, a["booster"], a["wall_times"], a["history"],
+        dctrl, dtest, yctrl, ytest, n_rounds, checkpoint_every,
+    )
+
+    a_to_f_trees, a_to_f_seconds = first_reach(adaptive_curve, f["fixed_test_logloss"])
+    f_to_a_trees, f_to_a_seconds = first_reach(fixed_curve, a["adaptive_test_logloss"])
+    compute = {
+        "label": label,
+        "eta0": float(eta0),
+        "fixed_final_test_logloss": f["fixed_test_logloss"],
+        "adaptive_final_test_logloss": a["adaptive_test_logloss"],
+        "paired_final_test_logloss_delta": float(delta),
+        "fixed_trajectory_mean_test_logloss": curve_mean_loss(fixed_curve),
+        "adaptive_trajectory_mean_test_logloss": curve_mean_loss(adaptive_curve),
+        "trajectory_mean_test_logloss_delta": float(
+            curve_mean_loss(adaptive_curve) - curve_mean_loss(fixed_curve)
+        ),
+        "adaptive_trees_to_fixed_final_loss": a_to_f_trees,
+        "adaptive_seconds_to_fixed_final_loss": a_to_f_seconds,
+        "fixed_trees_to_adaptive_final_loss": f_to_a_trees,
+        "fixed_seconds_to_adaptive_final_loss": f_to_a_seconds,
+        "fixed_final_training_wall_seconds": float(f["wall_times"][-1]),
+        "adaptive_final_training_wall_seconds": float(a["wall_times"][-1]),
+    }
+
+    row = {
+        k: v for k, v in f.items() if k not in {"booster", "wall_times"}
+    }
+    row.update({
+        k: v for k, v in a.items() if k not in {"history", "booster", "wall_times"}
+    })
     row["label"] = label
     row["paired_test_logloss_delta"] = float(delta)
     row["adaptive_wins"] = bool(delta < 0)
-    return row, a["history"]
+    return row, a["history"], fixed_curve + adaptive_curve, compute
 
 
 def main():
     args = parse_args()
     t0 = time.time()
-    print(f"nthread={args.nthread} n_starts={args.n_starts} n_rounds={args.n_rounds}", flush=True)
+    print(
+        f"nthread={args.nthread} n_starts={args.n_starts} "
+        f"n_rounds={args.n_rounds} checkpoint_every={args.checkpoint_every}",
+        flush=True,
+    )
     dtrain, dctrl, dtest, yctrl, ytest = load_data()
 
     rng = np.random.default_rng(SEED)
@@ -275,26 +380,38 @@ def main():
 
     rows = []
     histories = {}
+    convergence_rows = []
+    compute_rows = []
     for i, eta0 in enumerate(starts):
         label = f"prior_draw_{i:02d}"
-        row, history = paired_run(
+        row, history, curves, compute = paired_run(
             dtrain, dctrl, dtest, yctrl, ytest,
-            float(eta0), args.nthread, args.n_rounds, label,
+            float(eta0), args.nthread, args.n_rounds,
+            args.checkpoint_every, label,
         )
         rows.append(row)
         histories[label] = history
+        convergence_rows.extend(curves)
+        compute_rows.append(compute)
 
-    # Exact prior-median pair is reported separately and is not included in the
-    # Monte Carlo estimate of the prior expectation.
-    median_row, median_history = paired_run(
+    median_row, median_history, median_curves, median_compute = paired_run(
         dtrain, dctrl, dtest, yctrl, ytest,
-        prior_median, args.nthread, args.n_rounds, "prior_median",
+        prior_median, args.nthread, args.n_rounds,
+        args.checkpoint_every, "prior_median",
     )
     histories["prior_median"] = median_history
+    convergence_rows.extend(median_curves)
+    compute_rows.append(median_compute)
 
     df = pd.DataFrame(rows)
     df.to_csv(OUT / "covtype_online_eta_pairs.csv", index=False)
     pd.DataFrame([median_row]).to_csv(OUT / "covtype_online_eta_median.csv", index=False)
+    pd.DataFrame(convergence_rows).to_csv(
+        OUT / "covtype_online_eta_convergence.csv", index=False
+    )
+    pd.DataFrame(compute_rows).to_csv(
+        OUT / "covtype_online_eta_compute_summary.csv", index=False
+    )
     with open(OUT / "covtype_online_eta_history.json", "w") as f:
         json.dump(histories, f, indent=2)
 
@@ -308,11 +425,13 @@ def main():
     else:
         ci_low = ci_high = float("nan")
 
+    prior_compute = pd.DataFrame(compute_rows[:-1])
     summary = {
         "dataset": "UCI Covertype",
         "sample_size": N_SAMPLE,
         "n_rounds": args.n_rounds,
         "n_prior_draws": args.n_starts,
+        "checkpoint_every": args.checkpoint_every,
         "eta_prior": {
             "distribution": "log-uniform",
             "min": ETA_MIN,
@@ -331,7 +450,23 @@ def main():
         "mean_paired_improvement": float(-mean_delta),
         "paired_delta_95pct_t_interval": [float(ci_low), float(ci_high)],
         "adaptive_win_rate": float(df["adaptive_wins"].mean()),
+        "expected_fixed_trajectory_mean_test_logloss": float(
+            prior_compute["fixed_trajectory_mean_test_logloss"].mean()
+        ),
+        "expected_adaptive_trajectory_mean_test_logloss": float(
+            prior_compute["adaptive_trajectory_mean_test_logloss"].mean()
+        ),
+        "mean_trajectory_test_logloss_delta": float(
+            prior_compute["trajectory_mean_test_logloss_delta"].mean()
+        ),
+        "mean_fixed_training_wall_seconds": float(
+            prior_compute["fixed_final_training_wall_seconds"].mean()
+        ),
+        "mean_adaptive_training_wall_seconds": float(
+            prior_compute["adaptive_final_training_wall_seconds"].mean()
+        ),
         "median_start": median_row,
+        "median_start_compute": median_compute,
         "passes_gate": bool(mean_delta <= -0.005 and df["adaptive_wins"].mean() >= 0.70),
         "gate_definition": "mean paired test-logloss improvement >=0.005 and adaptive win rate >=70%",
         "tree_fit_budget_per_pair": {
