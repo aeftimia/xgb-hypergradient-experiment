@@ -2,7 +2,11 @@ name: Covertype falsification
 
 on:
   push:
-    branches: [falsification-covtype]
+    branches: [master]
+    paths:
+      - 'covtype_falsification.py'
+      - '.github/workflows/covtype-falsification.yml'
+      - 'requirements.txt'
   workflow_dispatch:
 
 jobs:
