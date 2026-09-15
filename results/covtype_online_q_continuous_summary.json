@@ -1,0 +1,54 @@
+{
+  "dataset": "UCI Covertype",
+  "sample_size": 250000,
+  "n_rounds": 750,
+  "n_prior_draws": 20,
+  "baseline": "10-tree blocked hypergradient, committed results",
+  "continuous_q_controller": {
+    "block_trees": 10,
+    "horizon_blocks": 5,
+    "horizon_trees": 50,
+    "warmup_blocks": 20,
+    "epsilon_explore": 0.1,
+    "action": "continuous log-eta offset from HG proposal",
+    "trust_log_radius": 0.35,
+    "model": "bootstrap ridge ensemble, quadratic in continuous action",
+    "ensemble_size": 32,
+    "ridge_alpha": 1.0,
+    "pessimism_beta": 0.5,
+    "optimizer": "bounded scalar minimization of mean+beta*std",
+    "counterfactual_tree_fits": 0,
+    "target": "realized 50-tree future control-logloss change"
+  },
+  "expected_hypergrad_test_logloss": 0.17261508405208584,
+  "expected_continuous_q_test_logloss": 0.1678881138563156,
+  "mean_cq_minus_hypergrad_test_logloss": -0.004726970195770232,
+  "mean_cq_improvement_over_hypergrad": 0.004726970195770232,
+  "paired_delta_95pct_t_interval_vs_hypergrad": [
+    -0.020555686232856883,
+    0.01110174584131642
+  ],
+  "continuous_q_win_rate_vs_hypergrad": 0.5,
+  "mean_continuous_q_wall_seconds": 68.60423502710037,
+  "mean_boundary_eta_fraction": 0.2333333333333333,
+  "predeclared_primary_gate": {
+    "definition": "mean improvement over HG >=0.002 and win rate >=60%",
+    "passes": false
+  },
+  "main_path_tree_budget": {
+    "hypergradient": 750,
+    "continuous_q": 750
+  },
+  "test_used_for_adaptation": false,
+  "elapsed_seconds": 6155.419146060944,
+  "secondary_vs_discrete_q": {
+    "expected_discrete_q_test_logloss": 0.1569697134196758,
+    "mean_cq_minus_discrete_q_test_logloss": 0.010918400436639822,
+    "mean_cq_improvement_over_discrete_q": -0.010918400436639822,
+    "paired_delta_95pct_t_interval": [
+      -0.0008760370998207138,
+      0.022712837973100357
+    ],
+    "continuous_q_win_rate_vs_discrete_q": 0.4
+  }
+}
