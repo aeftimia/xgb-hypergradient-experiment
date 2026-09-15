@@ -1,0 +1,2 @@
+eta0,fixed_final_eta,fixed_control_logloss,fixed_test_logloss,fixed_test_accuracy,adaptive_final_eta,adaptive_control_logloss,adaptive_test_logloss,adaptive_test_accuracy,label,paired_test_logloss_delta,adaptive_wins
+0.15491933384829668,0.15491933384829668,0.2011009156703949,0.203525111079216,0.92376,0.27241667613823534,0.16798390448093414,0.1701028198003769,0.9371733333333333,prior_median,-0.03342229127883911,True
