@@ -1,0 +1,49 @@
+{
+  "dataset": "UCI Covertype",
+  "sample_size": 250000,
+  "n_rounds": 750,
+  "n_prior_draws": 20,
+  "baseline": "10-tree blocked hypergradient, previously committed results",
+  "q_controller": {
+    "block_trees": 10,
+    "horizon_blocks": 5,
+    "horizon_trees": 50,
+    "warmup_blocks": 20,
+    "epsilon_explore": 0.1,
+    "candidate_log_offsets_around_hypergrad_proposal": [
+      -0.2,
+      -0.1,
+      0.0,
+      0.1,
+      0.2
+    ],
+    "model": "bootstrap ridge ensemble",
+    "ensemble_size": 32,
+    "ridge_alpha": 1.0,
+    "pessimism_beta": 0.5,
+    "counterfactual_tree_fits": 0,
+    "target": "realized future control-logloss change"
+  },
+  "expected_hypergrad_test_logloss": 0.17261508405208584,
+  "expected_q_test_logloss": 0.15696971341967583,
+  "mean_q_minus_hypergrad_test_logloss": -0.015645370632410015,
+  "mean_q_improvement_over_hypergrad": 0.015645370632410015,
+  "paired_delta_95pct_t_interval": [
+    -0.028759001342069112,
+    -0.002531739922750919
+  ],
+  "q_win_rate_vs_hypergrad": 0.5,
+  "mean_q_wall_seconds": 64.22229535439983,
+  "mean_q_labels_matured": 70.0,
+  "mean_q_greedy_blocks": 48.8,
+  "predeclared_q_gate": {
+    "definition": "mean Q improvement over blocked hypergradient >=0.002 and Q win rate >=60%",
+    "passes": false
+  },
+  "main_path_tree_budget": {
+    "hypergradient": 750,
+    "q_controller": 750
+  },
+  "test_used_for_adaptation": false,
+  "elapsed_seconds": 1310.223405122757
+}
